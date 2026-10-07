@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin - Kirana Store</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="topbar"><div class="brand">⚙️ Kirana Store Admin</div><a class="admin-link" href="/">Customer Store</a></header>
+<main class="admin-layout">
+<section id="login" class="panel login-panel">
+<h2>Admin Login</h2><p class="muted">Enter the admin key configured for this store.</p>
+<form id="loginForm"><input id="key" type="password" placeholder="Admin key" required><button class="primary">Login</button></form><p id="loginMsg"></p>
+</section>
+
+<div id="dashboard" class="hidden">
+<section class="stats">
+<div class="stat"><span>📦 Products</span><b id="sProducts">0</b></div>
+<div class="stat"><span>🛒 Total Orders</span><b id="sOrders">0</b></div>
+<div class="stat"><span>⏳ Pending Orders</span><b id="sPending">0</b></div>
+<div class="stat"><span>💰 Sales</span><b id="sSales">₹0</b></div>
+<div class="stat"><span>💸 Expenses</span><b id="sExpenses">₹0</b></div>
+<div class="stat"><span>📈 Net Profit</span><b id="sProfit">₹0</b></div>
+<div class="stat warning"><span>⚠️ Low Stock</span><b id="sLowStock">0</b></div>
+</section>
+
+<section class="panel">
+<div class="section-head"><div><h2>Add Product</h2><p class="muted">Add your products with buying price, selling price and stock.</p></div></div>
+<form id="productForm" class="admin-form">
+<input id="pName" placeholder="Product name" required><input id="pCategory" placeholder="Category" required>
+<input id="pPrice" type="number" min="0" step="0.01" placeholder="Selling price" required><input id="pCost" type="number" min="0" step="0.01" placeholder="Cost price" required>
+<input id="pStock" type="number" min="0" step="1" placeholder="Stock" required><input id="pUnit" placeholder="Unit e.g. kg, piece" value="piece">
+<input id="pImage" placeholder="Image URL (optional)"><button class="primary">➕ Add Product</button>
+</form>
+</section>
+
+<section class="panel"><div class="section-head"><h2>📦 Product List</h2><input id="productSearch" class="small-input" placeholder="Search products..."></div><div id="productTable"></div></section>
+<section class="panel"><div class="section-head"><h2>🛒 Orders</h2><select id="orderFilter" class="small-input"><option>All</option><option>Pending</option><option>Confirmed</option><option>Packed</option><option>Delivered</option><option>Cancelled</option></select></div><div id="orderTable"></div></section>
+
+<section class="panel">
+<h2>💸 Add Expense</h2>
+<form id="expenseForm" class="admin-form expense-form"><input id="eTitle" placeholder="Expense title" required><input id="eAmount" type="number" min="0.01" step="0.01" placeholder="Amount" required><button class="primary">➕ Add Expense</button></form>
+<h3>Recent Expenses</h3><div id="expenseTable"></div>
+</section>
+</div>
+</main>
+<script src="/admin/admin.js"></script>
+</body>
+</html>

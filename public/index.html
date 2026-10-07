@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kirana Store</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🛒 My Kirana Store</div>
+  <a class="admin-link" href="/admin/">Admin</a>
+</header>
+
+<main class="container">
+  <section class="hero">
+    <div>
+      <h1>Daily groceries at your fingertips</h1>
+      <p>Search products, add them to your cart and place your order.</p>
+    </div>
+  </section>
+
+  <section class="toolbar">
+    <input id="search" placeholder="🔍 Search products...">
+    <select id="category"><option>All</option></select>
+  </section>
+
+  <section id="products" class="grid"></section>
+
+  <section class="cart-box">
+    <h2>🛒 Your Cart</h2>
+    <div id="cart"></div>
+    <div class="cart-total">Total: ₹<span id="total">0.00</span></div>
+    <button id="checkoutBtn" class="primary">Place Order</button>
+  </section>
+
+  <section id="checkout" class="checkout hidden">
+    <h2>Customer Details</h2>
+    <form id="orderForm">
+      <input id="customerName" placeholder="Full name" required>
+      <input id="phone" placeholder="Mobile number" required>
+      <textarea id="address" placeholder="Delivery address" required></textarea>
+      <button class="primary">Confirm Order</button>
+      <button type="button" id="cancelCheckout">Cancel</button>
+    </form>
+    <p id="orderMessage"></p>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
