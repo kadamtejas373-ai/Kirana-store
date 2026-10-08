@@ -1,45 +1,6 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin - Kirana Store</title><link rel="stylesheet" href="/style.css"></head>
-<body>
-<header class="topbar"><div class="brand">⚙️ Kirana Store Admin</div><a class="admin-link" href="/">Customer Store</a></header>
-<main class="admin-layout">
-<section id="login" class="panel login-panel">
-<h2>Admin Login</h2><p class="muted">Enter the admin key configured for this store.</p>
-<form id="loginForm"><input id="key" type="password" placeholder="Admin key" required><button class="primary">Login</button></form><p id="loginMsg"></p>
-</section>
-
-<div id="dashboard" class="hidden">
-<section class="stats">
-<div class="stat"><span>📦 Products</span><b id="sProducts">0</b></div>
-<div class="stat"><span>🛒 Total Orders</span><b id="sOrders">0</b></div>
-<div class="stat"><span>⏳ Pending Orders</span><b id="sPending">0</b></div>
-<div class="stat"><span>💰 Sales</span><b id="sSales">₹0</b></div>
-<div class="stat"><span>💸 Expenses</span><b id="sExpenses">₹0</b></div>
-<div class="stat"><span>📈 Net Profit</span><b id="sProfit">₹0</b></div>
-<div class="stat warning"><span>⚠️ Low Stock</span><b id="sLowStock">0</b></div>
-</section>
-
-<section class="panel">
-<div class="section-head"><div><h2>Add Product</h2><p class="muted">Add your products with buying price, selling price and stock.</p></div></div>
-<form id="productForm" class="admin-form">
-<input id="pName" placeholder="Product name" required><input id="pCategory" placeholder="Category" required>
-<input id="pPrice" type="number" min="0" step="0.01" placeholder="Selling price" required><input id="pCost" type="number" min="0" step="0.01" placeholder="Cost price" required>
-<input id="pStock" type="number" min="0" step="1" placeholder="Stock" required><input id="pUnit" placeholder="Unit e.g. kg, piece" value="piece">
-<input id="pImage" placeholder="Image URL (optional)"><button class="primary">➕ Add Product</button>
-</form>
-</section>
-
-<section class="panel"><div class="section-head"><h2>📦 Product List</h2><input id="productSearch" class="small-input" placeholder="Search products..."></div><div id="productTable"></div></section>
-<section class="panel"><div class="section-head"><h2>🛒 Orders</h2><select id="orderFilter" class="small-input"><option>All</option><option>Pending</option><option>Confirmed</option><option>Packed</option><option>Delivered</option><option>Cancelled</option></select></div><div id="orderTable"></div></section>
-
-<section class="panel">
-<h2>💸 Add Expense</h2>
-<form id="expenseForm" class="admin-form expense-form"><input id="eTitle" placeholder="Expense title" required><input id="eAmount" type="number" min="0.01" step="0.01" placeholder="Amount" required><button class="primary">➕ Add Expense</button></form>
-<h3>Recent Expenses</h3><div id="expenseTable"></div>
-</section>
-</div>
-</main>
-<script src="/admin/admin.js"></script>
-</body>
-</html>
+<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin - Kirana Market</title><link rel="stylesheet" href="/style.css"></head><body><header class="topbar"><div class="brand">⚙️ Kirana Market Admin</div><a class="admin-link" href="/">Customer Store</a></header><main class="admin-layout"><section id="login" class="panel login-panel"><h2>Admin Login</h2><form id="loginForm"><input id="key" type="password" placeholder="Admin key" required><button class="primary">Login</button></form><p id="loginMsg"></p></section><div id="dashboard" class="hidden"><section class="stats"><div class="stat">📦 Products<b id="sProducts">0</b></div><div class="stat">🛒 Orders<b id="sOrders">0</b></div><div class="stat">⏳ Pending<b id="sPending">0</b></div><div class="stat">💰 Sales<b id="sSales">₹0</b></div><div class="stat">💸 Expenses<b id="sExpenses">₹0</b></div><div class="stat">📈 Profit<b id="sProfit">₹0</b></div><div class="stat">⚠️ Low Stock<b id="sLowStock">0</b></div><div class="stat">⏰ Expiring 7d<b id="sExpiring">0</b></div></section>
+<section class="panel"><h2>🎨 Theme & Branding</h2><form id="settingsForm" class="admin-form"><input id="shopName" placeholder="Shop name"><input id="welcomeText" placeholder="Welcome text"><input id="logo" placeholder="Logo URL or upload below"><label>Theme <select id="theme"><option value="blue">Blue</option><option value="green">Green</option><option value="orange">Orange</option><option value="purple">Purple</option><option value="pink">Pink</option></select></label><label><input id="startupAnimation" type="checkbox"> Startup animation</label><label><input id="celebration" type="checkbox"> Order celebration</label><input id="logoFile" type="file" accept="image/*"><button class="primary">Save Branding & Theme</button></form></section>
+<section class="panel"><h2>📣 Offers / Ads</h2><form id="offerForm" class="admin-form"><input id="offerTitle" placeholder="Offer title" required><input id="offerText" placeholder="Offer details"><input id="offerImage" placeholder="Banner image URL"><input id="offerEnd" type="date"><button class="primary">Add Offer</button></form><div id="offersAdmin"></div></section>
+<section class="panel"><h2>📦 Add Product</h2><form id="productForm" class="admin-form"><input id="pName" placeholder="Product name" required><input id="pCategory" placeholder="Category" required><input id="pPrice" type="number" placeholder="Selling price"><input id="pCost" type="number" placeholder="Cost price"><input id="pStock" type="number" placeholder="Stock"><input id="pUnit" placeholder="Unit" value="piece"><input id="pImage" placeholder="Image URL"><input id="pBarcode" placeholder="Barcode / SKU"><input id="pExpiry" type="date"><input id="pBest" type="number" placeholder="Best before days"><button class="primary">➕ Add Product</button></form><div id="productTable"></div></section>
+<section class="panel"><h2>🧾 Billing / POS</h2><p class="muted">USB/Bluetooth barcode scanners normally type into this box automatically.</p><input id="billScan" placeholder="Scan barcode or type product name"><div id="billSearch"></div><div id="billCart"></div><input id="billCustomer" placeholder="Customer name"><input id="billPhone" placeholder="Phone"><input id="billDiscount" type="number" placeholder="Discount"><button class="primary" onclick="createBill()">Create & Print Bill</button></section>
+<section class="panel"><h2>🛒 Orders</h2><div id="orderTable"></div></section><section class="panel"><h2>💬 Feedback</h2><div id="feedbackTable"></div></section><section class="panel"><h2>⭐ Ratings</h2><div id="ratingTable"></div></section><section class="panel"><h2>💸 Expenses</h2><form id="expenseForm" class="admin-form"><input id="eTitle" placeholder="Expense title"><input id="eAmount" type="number" placeholder="Amount"><button class="primary">Add Expense</button></form><div id="expenseTable"></div></section></div></main><script src="/admin/admin.js"></script></body></html>

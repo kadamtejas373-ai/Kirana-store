@@ -1,234 +1,83 @@
-const express = require("express");
-const path = require("path");
-const fs = require("fs");
+const express=require('express');
+const path=require('path');
+const {Pool}=require('pg');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const ADMIN_KEY = process.env.ADMIN_KEY || "change-this-admin-key";
-const DATA_FILE = path.join(__dirname, "store-data.json");
+const app=express();
+const PORT=process.env.PORT||3000;
+const ADMIN_KEY=process.env.ADMIN_KEY||'change-this-admin-key';
+const DATABASE_URL=process.env.DATABASE_URL;
 
-function now() {
-  return new Date().toISOString();
+if(!DATABASE_URL){
+  console.error('DATABASE_URL is missing. Add a Render PostgreSQL database and connect it to this service.');
+  process.exit(1);
 }
 
-function emptyData() {
-  return {
-    products: [],
-    orders: [],
-    order_items: [],
-    expenses: [],
-    nextIds: { products: 1, orders: 1, order_items: 1, expenses: 1 }
-  };
-}
+const pool=new Pool({connectionString:DATABASE_URL,ssl:{rejectUnauthorized:false},max:5,idleTimeoutMillis:30000});
+const now=()=>new Date();
+const admin=(req,res,next)=>{if(req.headers['x-admin-key']!==ADMIN_KEY)return res.status(401).json({error:'Invalid admin key'});next()};
 
-function loadData() {
-  if (!fs.existsSync(DATA_FILE)) return emptyData();
-  try {
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    const base = emptyData();
-    data.nextIds = { ...base.nextIds, ...(data.nextIds || {}) };
-    data.products ||= [];
-    data.orders ||= [];
-    data.order_items ||= [];
-    data.expenses ||= [];
-    return data;
-  } catch (err) {
-    console.error("Could not read store-data.json:", err.message);
-    return emptyData();
+app.use(express.json({limit:'3mb'}));
+app.use(express.urlencoded({extended:true}));
+app.use(express.static(path.join(__dirname,'public')));
+
+async function initDb(){
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY DEFAULT 1, shop_name TEXT NOT NULL DEFAULT 'Kirana Market', welcome_text TEXT NOT NULL DEFAULT 'Fresh groceries. Easy shopping.', logo TEXT DEFAULT '', theme TEXT NOT NULL DEFAULT 'blue', startup_animation BOOLEAN NOT NULL DEFAULT TRUE, celebration BOOLEAN NOT NULL DEFAULT TRUE);
+    CREATE TABLE IF NOT EXISTS products(id SERIAL PRIMARY KEY,name TEXT NOT NULL,category TEXT NOT NULL,price NUMERIC(12,2) NOT NULL DEFAULT 0,cost_price NUMERIC(12,2) NOT NULL DEFAULT 0,stock INTEGER NOT NULL DEFAULT 0,unit TEXT NOT NULL DEFAULT 'piece',image TEXT DEFAULT '',barcode TEXT DEFAULT '',expiry_date DATE,best_before_days INTEGER,active BOOLEAN NOT NULL DEFAULT TRUE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS orders(id SERIAL PRIMARY KEY,customer_name TEXT NOT NULL,phone TEXT NOT NULL,address TEXT NOT NULL,total NUMERIC(12,2) NOT NULL,status TEXT NOT NULL DEFAULT 'Pending',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS order_items(id SERIAL PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,product_id INTEGER NOT NULL REFERENCES products(id),product_name TEXT NOT NULL,quantity INTEGER NOT NULL,price NUMERIC(12,2) NOT NULL,cost_price NUMERIC(12,2) NOT NULL);
+    CREATE TABLE IF NOT EXISTS expenses(id SERIAL PRIMARY KEY,title TEXT NOT NULL,amount NUMERIC(12,2) NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS offers(id SERIAL PRIMARY KEY,title TEXT NOT NULL,text TEXT DEFAULT '',image TEXT DEFAULT '',active BOOLEAN NOT NULL DEFAULT TRUE,end_date DATE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS feedback(id SERIAL PRIMARY KEY,name TEXT DEFAULT 'Customer',phone TEXT DEFAULT '',message TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'New',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS ratings(id SERIAL PRIMARY KEY,product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),comment TEXT DEFAULT '',name TEXT DEFAULT 'Customer',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS bills(id SERIAL PRIMARY KEY,customer_name TEXT DEFAULT 'Walk-in Customer',phone TEXT DEFAULT '',subtotal NUMERIC(12,2) NOT NULL,discount NUMERIC(12,2) NOT NULL DEFAULT 0,total NUMERIC(12,2) NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS bill_items(id SERIAL PRIMARY KEY,bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,product_id INTEGER NOT NULL REFERENCES products(id),product_name TEXT NOT NULL,quantity INTEGER NOT NULL,price NUMERIC(12,2) NOT NULL,cost_price NUMERIC(12,2) NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+  `);
+  await pool.query(`INSERT INTO settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING`);
+  const c=await pool.query('SELECT COUNT(*)::int AS n FROM products');
+  if(c.rows[0].n===0){
+    const seed=[['Rice','Grocery',60,48,50,'kg'],['Wheat Flour','Grocery',45,36,40,'kg'],['Sugar','Grocery',48,40,35,'kg'],['Toor Dal','Pulses',140,118,25,'kg'],['Tea','Beverages',120,95,20,'pack'],['Biscuits','Snacks',10,7,100,'pack'],['Cooking Oil','Grocery',140,125,30,'litre'],['Soap','Personal Care',35,27,60,'piece']];
+    for(const x of seed) await pool.query('INSERT INTO products(name,category,price,cost_price,stock,unit) VALUES($1,$2,$3,$4,$5,$6)',x);
   }
 }
 
-let db = loadData();
+function settingsOut(r){const x=r.rows[0];return{shopName:x.shop_name,welcomeText:x.welcome_text,logo:x.logo||'',theme:x.theme,startupAnimation:x.startup_animation,celebration:x.celebration}}
+function productOut(x){return{...x,price:Number(x.price),cost_price:Number(x.cost_price),stock:Number(x.stock),best_before_days:x.best_before_days==null?'':Number(x.best_before_days)}}
+function offerOut(x){return{...x,end_date:x.end_date?String(x.end_date).slice(0,10):''}}
 
-function saveData() {
-  const tmp = DATA_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf8");
-  fs.renameSync(tmp, DATA_FILE);
-}
+app.get('/api/settings',async(req,res)=>{try{res.json(settingsOut(await pool.query('SELECT * FROM settings WHERE id=1')))}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/products',async(req,res)=>{try{const q=String(req.query.q||'').trim(),c=String(req.query.category||'');const p=await pool.query(`SELECT p.*,COALESCE(AVG(r.rating),0)::float AS rating,COUNT(r.id)::int AS "ratingCount" FROM products p LEFT JOIN ratings r ON r.product_id=p.id WHERE p.active=TRUE AND ($1='' OR (p.name||' '||p.category||' '||COALESCE(p.barcode,'')) ILIKE '%'||$1||'%') AND ($2='' OR $2='All' OR p.category=$2) GROUP BY p.id ORDER BY p.name`,[q,c]);res.json(p.rows.map(productOut))}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/categories',async(req,res)=>{try{const r=await pool.query('SELECT DISTINCT category FROM products WHERE active=TRUE ORDER BY category');res.json(r.rows.map(x=>x.category))}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/offers',async(req,res)=>{try{const r=await pool.query(`SELECT * FROM offers WHERE active=TRUE AND (end_date IS NULL OR end_date>=CURRENT_DATE) ORDER BY id DESC`);res.json(r.rows.map(offerOut))}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/products/:id/ratings',async(req,res)=>{try{const r=await pool.query('SELECT * FROM ratings WHERE product_id=$1 ORDER BY id DESC',[req.params.id]);res.json(r.rows)}catch(e){res.status(500).json({error:e.message})}});
 
-function nextId(type) {
-  const id = db.nextIds[type]++;
-  return id;
-}
+app.post('/api/orders',async(req,res)=>{const{customerName,phone,address,items}=req.body;if(!customerName||!phone||!address||!Array.isArray(items)||!items.length)return res.status(400).json({error:'Customer details and cart items are required.'});const c=await pool.connect();try{await c.query('BEGIN');let total=0,rows=[];for(const it of items){const q=Number(it.quantity);if(!Number.isInteger(q)||q<1)throw Error('Invalid quantity.');const p=(await c.query('SELECT * FROM products WHERE id=$1 AND active=TRUE FOR UPDATE',[Number(it.productId)])).rows[0];if(!p||p.stock<q)throw Error(`Invalid quantity or stock for ${p?.name||'product'}.`);total+=Number(p.price)*q;rows.push({p,q})}const o=(await c.query('INSERT INTO orders(customer_name,phone,address,total) VALUES($1,$2,$3,$4) RETURNING id,total',[customerName.trim(),phone.trim(),address.trim(),total])).rows[0];for(const r of rows){await c.query('INSERT INTO order_items(order_id,product_id,product_name,quantity,price,cost_price) VALUES($1,$2,$3,$4,$5,$6)',[o.id,r.p.id,r.p.name,r.q,r.p.price,r.p.cost_price]);await c.query('UPDATE products SET stock=stock-$1 WHERE id=$2',[r.q,r.p.id])}await c.query('COMMIT');res.json({success:true,order:{id:o.id,total:Number(o.total)}})}catch(e){await c.query('ROLLBACK');res.status(400).json({error:e.message})}finally{c.release()}});
+app.post('/api/ratings',async(req,res)=>{try{const{productId,rating,comment,name}=req.body,n=Number(rating);if(!Number.isInteger(n)||n<1||n>5)return res.status(400).json({error:'Rating must be 1 to 5.'});const p=await pool.query('SELECT id FROM products WHERE id=$1',[productId]);if(!p.rowCount)return res.status(404).json({error:'Product not found.'});await pool.query('INSERT INTO ratings(product_id,rating,comment,name) VALUES($1,$2,$3,$4)',[productId,n,String(comment||'').slice(0,300),String(name||'Customer').slice(0,60)]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.post('/api/feedback',async(req,res)=>{try{const{name,phone,message}=req.body;if(!message)return res.status(400).json({error:'Feedback is required.'});await pool.query('INSERT INTO feedback(name,phone,message) VALUES($1,$2,$3)',[String(name||'Customer'),String(phone||''),String(message).slice(0,1000)]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
 
-function seedProducts() {
-  if (db.products.length) return;
-  const seed = [
-    ["Rice", "Grocery", 60, 48, 50, "kg", ""],
-    ["Wheat Flour", "Grocery", 45, 36, 40, "kg", ""],
-    ["Sugar", "Grocery", 48, 40, 35, "kg", ""],
-    ["Toor Dal", "Pulses", 140, 118, 25, "kg", ""],
-    ["Tea", "Beverages", 120, 95, 20, "pack", ""],
-    ["Biscuits", "Snacks", 10, 7, 100, "pack", ""],
-    ["Cooking Oil", "Grocery", 140, 125, 30, "litre", ""],
-    ["Soap", "Personal Care", 35, 27, 60, "piece", ""]
-  ];
-  db.products = seed.map(([name, category, price, cost_price, stock, unit, image]) => ({
-    id: nextId("products"), name, category, price, cost_price, stock, unit, image,
-    active: 1, created_at: now()
-  }));
-  saveData();
-}
+app.get('/api/admin/dashboard',admin,async(req,res)=>{try{const [a,o,e,c,exp,ex7,fb]=await Promise.all([pool.query('SELECT COUNT(*)::int n FROM products WHERE active=TRUE'),pool.query('SELECT COUNT(*)::int n,COUNT(*) FILTER(WHERE status=\'Pending\')::int pending FROM orders'),pool.query('SELECT COALESCE(SUM(amount),0) total FROM expenses'),pool.query('SELECT COALESCE(SUM(total),0) total FROM orders WHERE status<>\'Cancelled\''),pool.query('SELECT COUNT(*)::int n FROM products WHERE active=TRUE AND expiry_date<CURRENT_DATE'),pool.query('SELECT COUNT(*)::int n FROM products WHERE active=TRUE AND expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE+INTERVAL \'7 days\''),pool.query("SELECT COUNT(*)::int n FROM feedback WHERE status='New'")]);const co=await pool.query("SELECT COALESCE(SUM(oi.quantity*oi.cost_price),0) cogs FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.status<>'Cancelled'");const low=await pool.query('SELECT COUNT(*)::int n FROM products WHERE active=TRUE AND stock<=5');const sales=Number(c.rows[0].total),expenses=Number(e.rows[0].total),cogs=Number(co.rows[0].cogs);res.json({products:a.rows[0].n,totalOrders:o.rows[0].n,pending:o.rows[0].pending,lowStock:low.rows[0].n,sales,expenses,profit:sales-cogs-expenses,cogs,expired:exp.rows[0].n,expiring:ex7.rows[0].n,feedbackNew:fb.rows[0].n})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/settings',admin,async(req,res)=>{try{res.json(settingsOut(await pool.query('SELECT * FROM settings WHERE id=1')))}catch(e){res.status(500).json({error:e.message})}});
+app.put('/api/admin/settings',admin,async(req,res)=>{try{const b=req.body;const r=await pool.query(`UPDATE settings SET shop_name=COALESCE($1,shop_name),welcome_text=COALESCE($2,welcome_text),logo=COALESCE($3,logo),theme=COALESCE($4,theme),startup_animation=COALESCE($5,startup_animation),celebration=COALESCE($6,celebration) WHERE id=1 RETURNING *`,[b.shopName,b.welcomeText,b.logo,b.theme,b.startupAnimation,b.celebration]);res.json({success:true,settings:settingsOut(r)})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/products',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM products ORDER BY id DESC');res.json(r.rows.map(productOut))}catch(e){res.status(500).json({error:e.message})}});
+app.post('/api/admin/products',admin,async(req,res)=>{try{const b=req.body;if(!b.name||!b.category)return res.status(400).json({error:'Name and category required.'});const r=await pool.query(`INSERT INTO products(name,category,price,cost_price,stock,unit,image,barcode,expiry_date,best_before_days) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[b.name.trim(),b.category.trim(),Number(b.price)||0,Number(b.costPrice)||0,Number(b.stock)||0,b.unit||'piece',b.image||'',b.barcode||'',b.expiryDate||null,b.bestBeforeDays?Number(b.bestBeforeDays):null]);res.json({success:true,id:r.rows[0].id})}catch(e){res.status(500).json({error:e.message})}});
+app.put('/api/admin/products/:id',admin,async(req,res)=>{try{const b=req.body;const r=await pool.query(`UPDATE products SET name=$1,category=$2,price=$3,cost_price=$4,stock=$5,unit=$6,image=$7,barcode=$8,expiry_date=$9,best_before_days=$10,active=$11 WHERE id=$12`,[String(b.name),String(b.category),Number(b.price)||0,Number(b.costPrice)||0,Number(b.stock)||0,b.unit||'piece',b.image||'',b.barcode||'',b.expiryDate||null,b.bestBeforeDays?Number(b.bestBeforeDays):null,Boolean(b.active),req.params.id]);if(!r.rowCount)return res.status(404).json({error:'Product not found.'});res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.delete('/api/admin/products/:id',admin,async(req,res)=>{try{await pool.query('UPDATE products SET active=FALSE WHERE id=$1',[req.params.id]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/orders',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM orders ORDER BY id DESC');const out=[];for(const o of r.rows){const it=await pool.query('SELECT * FROM order_items WHERE order_id=$1 ORDER BY id',[o.id]);out.push({...o,total:Number(o.total),items:it.rows})}res.json(out)}catch(e){res.status(500).json({error:e.message})}});
+app.patch('/api/admin/orders/:id',admin,async(req,res)=>{try{if(!['Pending','Confirmed','Packed','Delivered','Cancelled'].includes(req.body.status))return res.status(400).json({error:'Invalid status.'});await pool.query('UPDATE orders SET status=$1 WHERE id=$2',[req.body.status,req.params.id]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/expenses',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM expenses ORDER BY id DESC');res.json(r.rows.map(x=>({...x,amount:Number(x.amount)})))}catch(e){res.status(500).json({error:e.message})}});
+app.post('/api/admin/expenses',admin,async(req,res)=>{try{if(!req.body.title||Number(req.body.amount)<=0)return res.status(400).json({error:'Enter a valid expense.'});await pool.query('INSERT INTO expenses(title,amount) VALUES($1,$2)',[req.body.title,Number(req.body.amount)]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/offers',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM offers ORDER BY id DESC');res.json(r.rows.map(offerOut))}catch(e){res.status(500).json({error:e.message})}});
+app.post('/api/admin/offers',admin,async(req,res)=>{try{if(!req.body.title)return res.status(400).json({error:'Offer title required.'});const r=await pool.query('INSERT INTO offers(title,text,image,active,end_date) VALUES($1,$2,$3,TRUE,$4) RETURNING id',[req.body.title,String(req.body.text||''),req.body.image||'',req.body.endDate||null]);res.json({success:true,id:r.rows[0].id})}catch(e){res.status(500).json({error:e.message})}});
+app.patch('/api/admin/offers/:id',admin,async(req,res)=>{try{const b=req.body;await pool.query('UPDATE offers SET title=COALESCE($1,title),text=COALESCE($2,text),image=COALESCE($3,image),active=COALESCE($4,active),end_date=$5 WHERE id=$6',[b.title,b.text,b.image,b.active,b.endDate||null,req.params.id]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.delete('/api/admin/offers/:id',admin,async(req,res)=>{try{await pool.query('DELETE FROM offers WHERE id=$1',[req.params.id]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/feedback',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM feedback ORDER BY id DESC');res.json(r.rows)}catch(e){res.status(500).json({error:e.message})}});
+app.patch('/api/admin/feedback/:id',admin,async(req,res)=>{try{await pool.query('UPDATE feedback SET status=$1 WHERE id=$2',[req.body.status||'Read',req.params.id]);res.json({success:true})}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/ratings',admin,async(req,res)=>{try{const r=await pool.query('SELECT r.*,p.name product_name FROM ratings r JOIN products p ON p.id=r.product_id ORDER BY r.id DESC');res.json(r.rows)}catch(e){res.status(500).json({error:e.message})}});
+app.post('/api/admin/bills',admin,async(req,res)=>{const{customerName,phone,discount,items}=req.body;if(!Array.isArray(items)||!items.length)return res.status(400).json({error:'Add at least one item.'});const c=await pool.connect();try{await c.query('BEGIN');let subtotal=0,rows=[];for(const it of items){const q=Number(it.quantity);if(!Number.isInteger(q)||q<1)throw Error('Invalid quantity.');const p=(await c.query('SELECT * FROM products WHERE id=$1 AND active=TRUE FOR UPDATE',[it.productId])).rows[0];if(!p||p.stock<q)throw Error(`Invalid product or stock: ${p?.name||''}`);subtotal+=Number(p.price)*q;rows.push({p,q})}const dis=Math.min(Math.max(Number(discount)||0,0),subtotal),total=subtotal-dis;const b=(await c.query('INSERT INTO bills(customer_name,phone,subtotal,discount,total) VALUES($1,$2,$3,$4,$5) RETURNING id',[customerName||'Walk-in Customer',phone||'',subtotal,dis,total])).rows[0];for(const r of rows){await c.query('INSERT INTO bill_items(bill_id,product_id,product_name,quantity,price,cost_price) VALUES($1,$2,$3,$4,$5,$6)',[b.id,r.p.id,r.p.name,r.q,r.p.price,r.p.cost_price]);await c.query('UPDATE products SET stock=stock-$1 WHERE id=$2',[r.q,r.p.id])}await c.query('COMMIT');res.json({success:true,billId:b.id})}catch(e){await c.query('ROLLBACK');res.status(400).json({error:e.message})}finally{c.release()}});
+app.get('/api/admin/bills',admin,async(req,res)=>{try{const r=await pool.query('SELECT * FROM bills ORDER BY id DESC');const out=[];for(const b of r.rows){const it=await pool.query('SELECT * FROM bill_items WHERE bill_id=$1 ORDER BY id',[b.id]);out.push({...b,subtotal:Number(b.subtotal),discount:Number(b.discount),total:Number(b.total),items:it.rows})}res.json(out)}catch(e){res.status(500).json({error:e.message})}});
+app.get('/api/admin/reports/sales',admin,async(req,res)=>{try{const r=await pool.query(`SELECT DATE(created_at) day,COUNT(*)::int orders,COALESCE(SUM(total),0)::numeric sales FROM orders WHERE status<>'Cancelled' GROUP BY DATE(created_at) ORDER BY day DESC`);res.json(r.rows.map(x=>({...x,sales:Number(x.sales)})))}catch(e){res.status(500).json({error:e.message})}});
 
-seedProducts();
-
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
-
-function requireAdmin(req, res, next) {
-  const key = req.headers["x-admin-key"];
-  if (key !== ADMIN_KEY) return res.status(401).json({ error: "Invalid admin key" });
-  next();
-}
-
-app.get("/api/products", (req, res) => {
-  const q = String(req.query.q || "").trim().toLowerCase();
-  const category = String(req.query.category || "").trim();
-  let rows = db.products.filter(p => p.active === 1);
-  if (q) rows = rows.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
-  if (category && category !== "All") rows = rows.filter(p => p.category === category);
-  rows.sort((a, b) => a.name.localeCompare(b.name));
-  res.json(rows);
-});
-
-app.get("/api/categories", (req, res) => {
-  const cats = [...new Set(db.products.filter(p => p.active === 1).map(p => p.category))].sort();
-  res.json(cats);
-});
-
-app.post("/api/orders", (req, res) => {
-  const { customerName, phone, address, items } = req.body;
-  if (!customerName || !phone || !address || !Array.isArray(items) || !items.length) {
-    return res.status(400).json({ error: "Customer details and cart items are required." });
-  }
-
-  const rows = [];
-  let total = 0;
-  for (const item of items) {
-    const qty = Number(item.quantity);
-    const p = db.products.find(x => x.id === Number(item.productId) && x.active === 1);
-    if (!p || qty < 1 || !Number.isInteger(qty)) return res.status(400).json({ error: "Invalid product or quantity." });
-    if (p.stock < qty) return res.status(400).json({ error: `${p.name}: only ${p.stock} ${p.unit} available.` });
-    total += p.price * qty;
-    rows.push({ p, qty });
-  }
-
-  const orderId = nextId("orders");
-  const order = {
-    id: orderId,
-    customer_name: customerName.trim(),
-    phone: phone.trim(),
-    address: address.trim(),
-    total,
-    status: "Pending",
-    created_at: now()
-  };
-  db.orders.push(order);
-  for (const row of rows) {
-    db.order_items.push({
-      id: nextId("order_items"), order_id: orderId, product_id: row.p.id,
-      product_name: row.p.name, quantity: row.qty, price: row.p.price, cost_price: row.p.cost_price
-    });
-    row.p.stock -= row.qty;
-  }
-  saveData();
-  res.json({ success: true, order: { id: orderId, total } });
-});
-
-app.get("/api/admin/dashboard", requireAdmin, (req, res) => {
-  const activeProducts = db.products.filter(p => p.active === 1);
-  const products = activeProducts.length;
-  const totalOrders = db.orders.length;
-  const pending = db.orders.filter(o => o.status === "Pending").length;
-  const lowStock = activeProducts.filter(p => Number(p.stock) <= 5).length;
-  const validOrders = db.orders.filter(o => o.status !== "Cancelled");
-  const sales = validOrders.reduce((sum, o) => sum + Number(o.total), 0);
-  const expenses = db.expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const validOrderIds = new Set(validOrders.map(o => o.id));
-  const cogs = db.order_items.filter(i => validOrderIds.has(i.order_id))
-    .reduce((sum, i) => sum + Number(i.quantity) * Number(i.cost_price), 0);
-  res.json({ products, totalOrders, pending, lowStock, sales, expenses, profit: sales - cogs - expenses, cogs });
-});
-
-app.get("/api/admin/products", requireAdmin, (req, res) => {
-  res.json([...db.products].sort((a, b) => b.id - a.id));
-});
-
-app.post("/api/admin/products", requireAdmin, (req, res) => {
-  const { name, category, price, costPrice, stock, unit, image } = req.body;
-  if (!name || !category || Number(price) < 0 || Number(costPrice) < 0 || Number(stock) < 0) {
-    return res.status(400).json({ error: "Enter valid product details." });
-  }
-  const product = {
-    id: nextId("products"), name: name.trim(), category: category.trim(),
-    price: Number(price), cost_price: Number(costPrice), stock: Number(stock),
-    unit: unit || "piece", image: image || "", active: 1, created_at: now()
-  };
-  db.products.push(product);
-  saveData();
-  res.json({ success: true, id: product.id });
-});
-
-app.put("/api/admin/products/:id", requireAdmin, (req, res) => {
-  const { name, category, price, costPrice, stock, unit, image, active } = req.body;
-  const p = db.products.find(x => x.id === Number(req.params.id));
-  if (!p) return res.status(404).json({ error: "Product not found." });
-  p.name = name.trim(); p.category = category.trim(); p.price = Number(price);
-  p.cost_price = Number(costPrice); p.stock = Number(stock); p.unit = unit || "piece";
-  p.image = image || ""; p.active = active ? 1 : 0;
-  saveData();
-  res.json({ success: true });
-});
-
-app.delete("/api/admin/products/:id", requireAdmin, (req, res) => {
-  const p = db.products.find(x => x.id === Number(req.params.id));
-  if (!p) return res.status(404).json({ error: "Product not found." });
-  p.active = 0;
-  saveData();
-  res.json({ success: true });
-});
-
-app.get("/api/admin/orders", requireAdmin, (req, res) => {
-  const orders = [...db.orders].sort((a, b) => b.id - a.id);
-  res.json(orders.map(o => ({ ...o, items: db.order_items.filter(i => i.order_id === o.id) })));
-});
-
-app.patch("/api/admin/orders/:id", requireAdmin, (req, res) => {
-  const allowed = ["Pending", "Confirmed", "Packed", "Delivered", "Cancelled"];
-  if (!allowed.includes(req.body.status)) return res.status(400).json({ error: "Invalid status." });
-  const o = db.orders.find(x => x.id === Number(req.params.id));
-  if (!o) return res.status(404).json({ error: "Order not found." });
-  o.status = req.body.status;
-  saveData();
-  res.json({ success: true });
-});
-
-app.get("/api/admin/expenses", requireAdmin, (req, res) => {
-  res.json([...db.expenses].sort((a, b) => b.id - a.id));
-});
-
-app.post("/api/admin/expenses", requireAdmin, (req, res) => {
-  const { title, amount } = req.body;
-  if (!title || Number(amount) <= 0) return res.status(400).json({ error: "Enter a valid expense." });
-  const expense = { id: nextId("expenses"), title: title.trim(), amount: Number(amount), created_at: now() };
-  db.expenses.push(expense);
-  saveData();
-  res.json({ success: true, id: expense.id });
-});
-
-app.get("/api/admin/reports/sales", requireAdmin, (req, res) => {
-  const byDay = {};
-  db.orders.filter(o => o.status !== "Cancelled").forEach(o => {
-    const day = o.created_at.slice(0, 10);
-    if (!byDay[day]) byDay[day] = { day, orders: 0, sales: 0 };
-    byDay[day].orders += 1;
-    byDay[day].sales += Number(o.total);
-  });
-  res.json(Object.values(byDay).sort((a, b) => b.day.localeCompare(a.day)));
-});
-
-app.listen(PORT, () => {
-  console.log(`Kirana Store running at http://localhost:${PORT}`);
-  console.log(`Admin key: ${ADMIN_KEY}`);
-});
+initDb().then(()=>app.listen(PORT,()=>console.log(`Kirana Store running on port ${PORT}`))).catch(e=>{console.error('Database startup failed:',e);process.exit(1)});
